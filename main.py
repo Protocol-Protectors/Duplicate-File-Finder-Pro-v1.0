@@ -8,7 +8,6 @@ import subprocess
 from datetime import datetime
 import stat
 import mimetypes
-import pwd
 import sys
 
 try:
@@ -16,6 +15,17 @@ try:
 except ImportError:
     print("Warning: psutil not available. Drive info will be limited.")
     psutil = None
+
+if os.name == 'posix':
+    import pwd
+elif os.name == 'nt':
+    try:
+        import win32api
+        import win32con
+        import win32security
+    except ImportError:
+        print("Warning: pywin32 not available. Owner info will be limited on Windows.")
+        win32security = None
 
 
 class FileToolsApp:
@@ -40,7 +50,7 @@ class FileToolsApp:
 
         self.directory_entry = tk.Entry(master, width=50, font=("Arial", 12), relief="solid", borderwidth=1)
         self.directory_entry.grid(row=1, column=1, columnspan=2, sticky="ew", padx=15, pady=10)
-        self.directory_entry.insert(0, "/")
+        self.directory_entry.insert(0, "C:\\" if os.name == 'nt' else "/")
 
         self.browse_dir_button = tk.Button(master, text="Browse", command=self.browse_directory,
                                            width=15, font=("Arial", 12), bg="#4CAF50", fg="white",
@@ -52,14 +62,19 @@ class FileToolsApp:
         self.button_frame.grid(row=2, column=0, columnspan=4, pady=10)
 
         self.find_button = tk.Button(self.button_frame, text="Find Duplicates", command=self.start_duplicate_scan,
-                                     width=20, font=("Arial", 12), bg="#008CBA", fg="white",
-                                     relief="flat", activebackground="#007B9A")
+                                    width=20, font=("Arial", 12), bg="#008CBA", fg="white",
+                                    relief="flat", activebackground="#007B9A")
         self.find_button.pack(side=tk.LEFT, padx=15)
 
         self.full_disk_button = tk.Button(self.button_frame, text="Scan Drives", command=self.select_drives,
-                                          width=20, font=("Arial", 12), bg="#f44336", fg="white",
-                                          relief="flat", activebackground="#da190b")
+                                         width=20, font=("Arial", 12), bg="#f44336", fg="white",
+                                         relief="flat", activebackground="#da190b")
         self.full_disk_button.pack(side=tk.LEFT, padx=15)
+
+        self.stop_button = tk.Button(self.button_frame, text="Stop Scan", command=self.stop_scan,
+                                    width=20, font=("Arial", 12), bg="#ff9800", fg="white",
+                                    relief="flat", activebackground="#f57c00", state="disabled")
+        self.stop_button.pack(side=tk.LEFT, padx=15)
 
         # Progress Section
         self.progress_frame = tk.Frame(master, bg="#f0f4f7")
@@ -93,19 +108,16 @@ class FileToolsApp:
         self.view_button = tk.Button(self.action_frame, text="View Selected", command=self.view_selected_files,
                                      width=15, font=("Arial", 10), bg="#2196F3", fg="white",
                                      relief="flat", activebackground="#1976D2")
-        print("Created view_button in __init__")
         self.view_button.pack(side=tk.LEFT, padx=5)
 
         self.delete_button = tk.Button(self.action_frame, text="Delete Selected", command=self.delete_selected_files,
                                        width=15, font=("Arial", 10), bg="#ff4444", fg="white",
                                        relief="flat", activebackground="#cc0000")
-        print("Created delete_button in __init__")
         self.delete_button.pack(side=tk.LEFT, padx=5)
 
         self.metadata_button = tk.Button(self.action_frame, text="Show Metadata", command=self.show_metadata,
                                          width=15, font=("Arial", 10), bg="#8BC34A", fg="white",
                                          relief="flat", activebackground="#7CB342")
-        print("Created metadata_button in __init__")
         self.metadata_button.pack(side=tk.LEFT, padx=5)
 
         self.duplicates_dict = {}
@@ -139,7 +151,8 @@ Support Hours: 9 AM - 5 PM EST, Monday-Friday"""
         messagebox.showinfo("Contact Us", contact_text)
 
     def browse_directory(self):
-        directory = filedialog.askdirectory(initialdir="/", title="Select Directory")
+        initial_dir = "C:\\" if os.name == 'nt' else "/"
+        directory = filedialog.askdirectory(initialdir=initial_dir, title="Select Directory")
         if directory:
             self.directory_entry.delete(0, tk.END)
             self.directory_entry.insert(0, directory)
@@ -256,7 +269,7 @@ Support Hours: 9 AM - 5 PM EST, Monday-Friday"""
                     usage = psutil.disk_usage(partition.mountpoint)
                     drives.append({
                         'letter': partition.mountpoint,
-                        'name': partition.device.split('/')[-1] if partition.device else "Disk",
+                        'name': partition.device.split('/')[-1] if os.name == 'posix' else partition.device.split('\\')[-1] if partition.device else "Disk",
                         'type': partition.fstype,
                         'total': usage.total,
                         'free': usage.free
@@ -270,7 +283,12 @@ Support Hours: 9 AM - 5 PM EST, Monday-Friday"""
                         'free': 0
                     })
         else:
-            drives = [{'letter': '/', 'name': "Root", 'type': "Unknown", 'total': 0, 'free': 0}]
+            # Fallback for systems without psutil
+            if os.name == 'nt':
+                drives = [{'letter': f"{d}:\\", 'name': "Disk", 'type': "Unknown", 'total': 0, 'free': 0}
+                          for d in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' if os.path.exists(f"{d}:\\")]
+            else:
+                drives = [{'letter': '/', 'name': "Root", 'type': "Unknown", 'total': 0, 'free': 0}]
         return drives
 
     def prepare_scan(self):
@@ -281,18 +299,35 @@ Support Hours: 9 AM - 5 PM EST, Monday-Friday"""
         self.time_label.config(text="Estimated Time: Calculating...")
         self.find_button.config(state="disabled")
         self.full_disk_button.config(state="disabled")
+        self.stop_button.config(state="normal")
         self.view_button.config(state="disabled")
         self.delete_button.config(state="disabled")
         self.metadata_button.config(state="disabled")
 
+    def stop_scan(self):
+        if self.is_scanning:
+            if messagebox.askyesno("Confirm Stop", "Are you sure you want to stop the scan?"):
+                self.is_scanning = False
+                self.status_label.config(text="Status: Scan stopped by user")
+                self.time_label.config(text="Estimated Time: N/A")
+                self.find_button.config(state="normal")
+                self.full_disk_button.config(state="normal")
+                self.stop_button.config(state="disabled")
+                self.view_button.config(state="normal")
+                self.delete_button.config(state="normal")
+                self.metadata_button.config(state="normal")
+
     def scan_selected_drives(self, drives):
         duplicates = {}
         for drive in drives:
+            if not self.is_scanning:
+                break
             self.status_label.config(text=f"Status: Scanning drive {drive}")
             self.master.update_idletasks()
             drive_duplicates = self.find_duplicates(drive, suppress_results=True)
             duplicates.update(drive_duplicates)
-        self.display_results_and_handle_deletion(duplicates)
+        if self.is_scanning:
+            self.display_results_and_handle_deletion(duplicates)
 
     def find_duplicates(self, directory, suppress_results=False):
         file_hashes = {}
@@ -305,8 +340,12 @@ Support Hours: 9 AM - 5 PM EST, Monday-Friday"""
         start_time = time.time()
         for dirpath, _, filenames in os.walk(directory):
             if not self.is_scanning:
+                self.status_label.config(text="Status: Scan stopped")
                 break
             for filename in filenames:
+                if not self.is_scanning:
+                    self.status_label.config(text="Status: Scan stopped")
+                    break
                 file_path = os.path.join(dirpath, filename)
                 self.status_label.config(text=f"Status: Scanning {file_path}")
                 self.master.update_idletasks()
@@ -327,18 +366,20 @@ Support Hours: 9 AM - 5 PM EST, Monday-Friday"""
                         file_hashes[file_hash] = []
                     file_hashes[file_hash].append(file_path)
 
-        for file_list in file_hashes.values():
-            if len(file_list) > 1:
-                original = self.find_original_file(file_list)
-                duplicates[original] = file_list
-                self.original_hashes[original] = self.calculate_file_hash(original, 'sha256')
+        if self.is_scanning:
+            for file_list in file_hashes.values():
+                if len(file_list) > 1:
+                    original = self.find_original_file(file_list)
+                    duplicates[original] = file_list
+                    self.original_hashes[original] = self.calculate_file_hash(original, 'sha256')
 
-        if not suppress_results:
-            self.display_results_and_handle_deletion(duplicates)
+            if not suppress_results:
+                self.display_results_and_handle_deletion(duplicates)
 
         self.is_scanning = False
         self.find_button.config(state="normal")
         self.full_disk_button.config(state="normal")
+        self.stop_button.config(state="disabled")
         self.view_button.config(state="normal")
         self.delete_button.config(state="normal")
         self.metadata_button.config(state="normal")
@@ -355,6 +396,8 @@ Support Hours: 9 AM - 5 PM EST, Monday-Friday"""
         try:
             with open(filepath, 'rb') as file:
                 while chunk := file.read(8192):
+                    if not self.is_scanning:
+                        return None
                     hasher.update(chunk)
             return hasher.hexdigest()
         except (IOError, OSError) as e:
@@ -367,10 +410,21 @@ Support Hours: 9 AM - 5 PM EST, Monday-Friday"""
             file_type, _ = mimetypes.guess_type(filepath)
             _, file_extension = os.path.splitext(filepath)
 
-            try:
-                owner = pwd.getpwuid(stats.st_uid).pw_name
-            except:
-                owner = str(stats.st_uid)
+            # Platform-specific owner retrieval
+            if os.name == 'posix' and 'pwd' in globals():
+                try:
+                    owner = pwd.getpwuid(stats.st_uid).pw_name
+                except:
+                    owner = str(stats.st_uid)
+            elif os.name == 'nt' and 'win32security' in globals():
+                try:
+                    sd = win32security.GetFileSecurity(filepath, win32security.OWNER_SECURITY_INFORMATION)
+                    sid = sd.GetSecurityDescriptorOwner()
+                    owner, _, _ = win32security.LookupAccountSid(None, sid)
+                except:
+                    owner = "Unknown"
+            else:
+                owner = "Unknown"
 
             metadata = {
                 'Path': filepath,
@@ -382,7 +436,7 @@ Support Hours: 9 AM - 5 PM EST, Monday-Friday"""
                 'Accessed': datetime.fromtimestamp(stats.st_atime).strftime('%Y-%m-%d %H:%M:%S'),
                 'Type': file_type if file_type else 'Unknown',
                 'Owner': owner,
-                'Permissions': oct(stats.st_mode)[-3:],
+                'Permissions': oct(stats.st_mode)[-3:] if os.name == 'posix' else "N/A",
                 'SHA256 Hash': self.original_hashes.get(filepath, 'N/A')
             }
             return metadata
@@ -410,8 +464,7 @@ Support Hours: 9 AM - 5 PM EST, Monday-Friday"""
             header_frame.pack(fill="x", padx=10, pady=(10, 5))
 
             tk.Label(header_frame, text="File Metadata", font=("Arial", 14, "bold"), bg="#f0f4f7").pack(anchor="w")
-            tk.Label(header_frame, text=file_path, font=("Arial", 10, "italic"), bg="#f0f4f7", wraplength=480).pack(
-                anchor="w")
+            tk.Label(header_frame, text=file_path, font=("Arial", 10, "italic"), bg="#f0f4f7", wraplength=480).pack(anchor="w")
 
             metadata_frame = tk.Frame(metadata_window, bg="#f0f4f7")
             metadata_frame.pack(fill="both", expand=True, padx=10, pady=5)
@@ -430,10 +483,8 @@ Support Hours: 9 AM - 5 PM EST, Monday-Friday"""
 
             row = 0
             for key, value in metadata.items():
-                tk.Label(scrollable_frame, text=f"{key}:", font=("Arial", 10, "bold"), bg="#f0f4f7", anchor="w").grid(
-                    row=row, column=0, sticky="w", padx=(5, 10), pady=2)
-                tk.Label(scrollable_frame, text=value, font=("Arial", 10), bg="#f0f4f7", anchor="w",
-                         wraplength=400).grid(row=row, column=1, sticky="w", pady=2)
+                tk.Label(scrollable_frame, text=f"{key}:", font=("Arial", 10, "bold"), bg="#f0f4f7", anchor="w").grid(row=row, column=0, sticky="w", padx=(5, 10), pady=2)
+                tk.Label(scrollable_frame, text=value, font=("Arial", 10), bg="#f0f4f7", anchor="w", wraplength=400).grid(row=row, column=1, sticky="w", pady=2)
                 row += 1
 
             canvas.pack(side="left", fill="both", expand=True)
@@ -461,26 +512,22 @@ Support Hours: 9 AM - 5 PM EST, Monday-Friday"""
         self.result_frame = tk.Frame(self.master, bg="#f0f4f7")
         self.result_frame.grid(row=5, column=0, columnspan=4, sticky="nsew", padx=15, pady=10)
 
-        # Re-create action_frame
         self.action_frame = tk.Frame(self.result_frame, bg="#f0f4f7")
         self.action_frame.pack(side=tk.BOTTOM, fill="x", pady=5)
 
         self.view_button = tk.Button(self.action_frame, text="View Selected", command=self.view_selected_files,
                                      width=15, font=("Arial", 10), bg="#2196F3", fg="white",
                                      relief="flat", activebackground="#1976D2")
-        print("Created view_button in clear_results")
         self.view_button.pack(side=tk.LEFT, padx=5)
 
         self.delete_button = tk.Button(self.action_frame, text="Delete Selected", command=self.delete_selected_files,
                                        width=15, font=("Arial", 10), bg="#ff4444", fg="white",
                                        relief="flat", activebackground="#cc0000")
-        print("Created delete_button in clear_results")
         self.delete_button.pack(side=tk.LEFT, padx=5)
 
         self.metadata_button = tk.Button(self.action_frame, text="Show Metadata", command=self.show_metadata,
                                          width=15, font=("Arial", 10), bg="#8BC34A", fg="white",
                                          relief="flat", activebackground="#7CB342")
-        print("Created metadata_button in clear_results")
         self.metadata_button.pack(side=tk.LEFT, padx=5)
 
         self.duplicates_dict = {}
@@ -494,7 +541,6 @@ Support Hours: 9 AM - 5 PM EST, Monday-Friday"""
         self.result_frame = tk.Frame(self.master, bg="#f0f4f7")
         self.result_frame.grid(row=5, column=0, columnspan=4, sticky="nsew", padx=15, pady=10)
 
-        # Header Frame
         header_frame = tk.Frame(self.result_frame, bg="#f0f4f7")
         header_frame.pack(fill="x", pady=5)
 
@@ -512,7 +558,6 @@ Support Hours: 9 AM - 5 PM EST, Monday-Friday"""
                                      command=lambda v: self.filter_results(v, duplicates))
         filter_menu.pack(side=tk.LEFT, padx=5)
 
-        # Results Frame
         results_frame = tk.Frame(self.result_frame, bg="#f0f4f7")
         results_frame.pack(fill="both", expand=True, padx=5, pady=5)
 
@@ -536,26 +581,22 @@ Support Hours: 9 AM - 5 PM EST, Monday-Friday"""
         scrollbar.pack(side=tk.RIGHT, fill="y")
         self.tree.configure(yscrollcommand=scrollbar.set)
 
-        # Action Frame
         self.action_frame = tk.Frame(self.result_frame, bg="#f0f4f7")
         self.action_frame.pack(side=tk.BOTTOM, fill="x", pady=5)
 
         self.view_button = tk.Button(self.action_frame, text="View Selected", command=self.view_selected_files,
                                      width=15, font=("Arial", 10), bg="#2196F3", fg="white",
                                      relief="flat", activebackground="#1976D2")
-        print("Created view_button in display_results")
         self.view_button.pack(side=tk.LEFT, padx=5)
 
         self.delete_button = tk.Button(self.action_frame, text="Delete Selected", command=self.delete_selected_files,
                                        width=15, font=("Arial", 10), bg="#ff4444", fg="white",
                                        relief="flat", activebackground="#cc0000")
-        print("Created delete_button in display_results")
         self.delete_button.pack(side=tk.LEFT, padx=5)
 
         self.metadata_button = tk.Button(self.action_frame, text="Show Metadata", command=self.show_metadata,
                                          width=15, font=("Arial", 10), bg="#8BC34A", fg="white",
                                          relief="flat", activebackground="#7CB342")
-        print("Created metadata_button in display_results")
         self.metadata_button.pack(side=tk.LEFT, padx=5)
 
     def populate_treeview(self, duplicates):
@@ -636,7 +677,10 @@ Support Hours: 9 AM - 5 PM EST, Monday-Friday"""
         for item in selected_items:
             file_path = self.tree.item(item, "values")[0]
             try:
-                subprocess.call(['xdg-open', file_path])
+                if os.name == 'nt':  # Windows
+                    os.startfile(file_path)
+                else:  # Linux/Unix
+                    subprocess.call(['xdg-open', file_path])
             except Exception as e:
                 messagebox.showerror("Error", f"Could not open file: {file_path}\nError: {e}")
 
@@ -675,15 +719,10 @@ Support Hours: 9 AM - 5 PM EST, Monday-Friday"""
 
 def main():
     root = tk.Tk()
-    # Platform-specific window maximization
     if os.name == 'nt':  # Windows
         root.state('zoomed')
     else:  # Linux/Unix
-        root.attributes('-zoomed', True)  # This works on X11-based systems
-        # Alternative approach: set geometry to screen size
-        # screen_width = root.winfo_screenwidth()
-        # screen_height = root.winfo_screenheight()
-        # root.geometry(f"{screen_width}x{screen_height}+0+0")
+        root.attributes('-zoomed', True)
 
     app = FileToolsApp(root)
     root.protocol("WM_DELETE_WINDOW", lambda: root.quit() if not app.is_scanning else None)
