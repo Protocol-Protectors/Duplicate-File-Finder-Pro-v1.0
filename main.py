@@ -62,18 +62,18 @@ class FileToolsApp:
         self.button_frame.grid(row=2, column=0, columnspan=4, pady=10)
 
         self.find_button = tk.Button(self.button_frame, text="Find Duplicates", command=self.start_duplicate_scan,
-                                    width=20, font=("Arial", 12), bg="#008CBA", fg="white",
-                                    relief="flat", activebackground="#007B9A")
+                                     width=20, font=("Arial", 12), bg="#008CBA", fg="white",
+                                     relief="flat", activebackground="#007B9A")
         self.find_button.pack(side=tk.LEFT, padx=15)
 
         self.full_disk_button = tk.Button(self.button_frame, text="Scan Drives", command=self.select_drives,
-                                         width=20, font=("Arial", 12), bg="#f44336", fg="white",
-                                         relief="flat", activebackground="#da190b")
+                                          width=20, font=("Arial", 12), bg="#f44336", fg="white",
+                                          relief="flat", activebackground="#da190b")
         self.full_disk_button.pack(side=tk.LEFT, padx=15)
 
         self.stop_button = tk.Button(self.button_frame, text="Stop Scan", command=self.stop_scan,
-                                    width=20, font=("Arial", 12), bg="#ff9800", fg="white",
-                                    relief="flat", activebackground="#f57c00", state="disabled")
+                                     width=20, font=("Arial", 12), bg="#ff9800", fg="white",
+                                     relief="flat", activebackground="#f57c00", state="disabled")
         self.stop_button.pack(side=tk.LEFT, padx=15)
 
         # Progress Section
@@ -124,6 +124,99 @@ class FileToolsApp:
         self.is_scanning = False
         self.original_hashes = {}
         self.tree = None
+
+    def show_terms_and_conditions(self):
+        """Display Terms and Conditions and get user consent without destroying master."""
+        try:
+            terms_window = tk.Toplevel(self.master)
+            terms_window.title("Terms and Conditions - Duplicate File Finder Pro")
+            terms_window.geometry("700x650")
+            terms_window.transient(self.master)
+            terms_window.grab_set()
+            terms_window.configure(bg="#ffffff")
+            terms_window.resizable(False, False)
+
+            # Header Section
+            header_frame = tk.Frame(terms_window, bg="#0288D1", pady=15)
+            header_frame.pack(fill="x")
+
+            tk.Label(header_frame, text="Terms and Conditions", font=("Arial", 18, "bold"),
+                     fg="white", bg="#0288D1").pack()
+            tk.Label(header_frame, text="Please review and accept to continue",
+                     font=("Arial", 10, "italic"), fg="#E0F7FA", bg="#0288D1").pack()
+
+            # Terms Content Section
+            content_frame = tk.Frame(terms_window, bg="#ffffff", padx=20, pady=15)
+            content_frame.pack(fill="both", expand=True)
+
+            scrollbar = tk.Scrollbar(content_frame, orient="vertical")
+            scrollbar.pack(side=tk.RIGHT, fill="y")
+
+            terms_display = tk.Text(content_frame, height=20, width=80, wrap="word",
+                                    yscrollcommand=scrollbar.set, font=("Arial", 11),
+                                    bg="#F5F6F5", fg="#333333", bd=0, padx=10, pady=10,
+                                    spacing1=2, spacing2=2)
+            terms_display.pack(fill="both", expand=True)
+
+            terms_text = """
+                                           Welcome to Duplicate File Finder Pro v1.0
+                                                    Last Updated: March 16, 2025
+
+            By using this software, you agree to the following terms in compliance with applicable data protection laws:
+
+            1. Purpose of Data Processing
+               This application scans your files to identify duplicates. We process file metadata (e.g., file paths, sizes, timestamps) solely for this purpose.
+
+            2. Data Collection
+               No personal data is collected or transmitted outside your device unless explicitly authorized by you. All processing occurs locally on your system.
+
+            3. User Consent
+               By agreeing, you consent to the scanning and processing of file metadata on your device. You may withdraw consent by exiting the application at any time.
+
+            4. Data Security
+               We implement reasonable measures to protect processed data from unauthorized access during operation.
+
+            5. Data Deletion
+               Files marked as duplicates will only be deleted upon your explicit confirmation. No data is retained after the application is closed.
+
+            6. Liability
+               The developers (xAI Team) are not liable for data loss due to user-initiated actions (e.g., file deletion).
+
+                            Please select 'Agree' to proceed or 'Disagree' to exit the application.
+            """
+            terms_display.insert(tk.END, terms_text)
+            terms_display.config(state="disabled")
+            scrollbar.config(command=terms_display.yview)
+
+            # Footer Section with Buttons
+            footer_frame = tk.Frame(terms_window, bg="#ffffff", pady=15)
+            footer_frame.pack(fill="x")
+
+            agreed = tk.BooleanVar(value=False)
+            tk.Button(footer_frame, text=" Agree",
+                      command=lambda: [agreed.set(True), terms_window.destroy()],
+                      font=("Arial", 12, "bold"), bg="#4CAF50", fg="white",
+                      relief="flat", activebackground="#45A049", width=15,
+                      pady=5, cursor="hand2").pack(side=tk.LEFT, padx=(20, 10))
+            tk.Button(footer_frame, text="Disagree",
+                      command=lambda: [agreed.set(False), terms_window.destroy()],
+                      font=("Arial", 12, "bold"), bg="#F44336", fg="white",
+                      relief="flat", activebackground="#D32F2F", width=15,
+                      pady=5, cursor="hand2").pack(side=tk.RIGHT, padx=(10, 20))
+
+            # Center window
+            terms_window.update_idletasks()
+            width, height = 700, 650
+            x = (terms_window.winfo_screenwidth() // 2) - (width // 2)
+            y = (terms_window.winfo_screenheight() // 2) - (height // 2)
+            terms_window.geometry(f"{width}x{height}+{x}+{y}")
+
+            self.master.wait_window(terms_window)
+            return agreed.get()
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to display terms and conditions: {str(e)}")
+            return False
 
     def create_menu_bar(self):
         menu_bar = tk.Menu(self.master)
@@ -724,8 +817,21 @@ def main():
     else:  # Linux/Unix
         root.attributes('-zoomed', True)
 
-    app = FileToolsApp(root)
-    root.protocol("WM_DELETE_WINDOW", lambda: root.quit() if not app.is_scanning else None)
+    app = None
+    def on_closing():
+        if app is None or not app.is_scanning:
+            root.quit()
+
+    root.protocol("WM_DELETE_WINDOW", on_closing)
+
+    # Show terms and conditions before fully initializing the app
+    temp_app = FileToolsApp(root)  # Partially initialize to access show_terms_and_conditions
+    if not temp_app.show_terms_and_conditions():
+        root.destroy()  # Destroy root and exit if terms are rejected
+        return
+
+    # If terms are accepted, proceed with the app
+    app = temp_app
     root.mainloop()
 
 
