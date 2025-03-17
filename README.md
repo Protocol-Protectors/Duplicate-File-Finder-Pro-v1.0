@@ -13,6 +13,8 @@ A powerful and user-friendly tool built with Python and Tkinter to detect and ma
 8. **Cross-Platform:** Works on Windows, Linux, and macOS (with minor platform-specific adjustments). <br>
 
 **Screenshots** <br> 
+![image](https://github.com/user-attachments/assets/efeca151-321f-4f59-a554-1073cdbbdb7f)
+<br>
 ![Screenshot 2025-03-13 175603](https://github.com/user-attachments/assets/fe62e802-d6df-49d1-8f00-ee686318e342) <br> <br>
 ![Screenshot 2025-03-13 175645](https://github.com/user-attachments/assets/649226b1-fd70-445b-a906-dc63e601516d) <br> <br>
  ![Screenshot 2025-03-13 175725](https://github.com/user-attachments/assets/7e758dd1-4f1e-4502-8ee5-29a16be087f0) <br> <br>
